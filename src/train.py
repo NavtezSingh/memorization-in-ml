@@ -77,15 +77,16 @@ def main():
 
     collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
+    Path(args.out_dir).mkdir(parents=True, exist_ok=True)
+
     training_args = TrainingArguments(
         output_dir=args.out_dir,
-        overwrite_output_dir=True,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         learning_rate=args.lr,
         logging_steps=10,
         save_strategy="no",  # we save the final model manually below
-        report_to=[],
+        report_to="none",
         fp16=torch.cuda.is_available(),
     )
 
@@ -98,7 +99,6 @@ def main():
 
     trainer.train()
 
-    Path(args.out_dir).mkdir(parents=True, exist_ok=True)
     trainer.save_model(args.out_dir)
     tokenizer.save_pretrained(args.out_dir)
     print(f"Saved fine-tuned model -> {args.out_dir}")
