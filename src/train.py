@@ -59,6 +59,13 @@ def main():
                          help="HF model name, e.g. gpt2 (124M) or gpt2-medium if you have "
                               "the compute budget.")
     parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--max_steps", type=int, default=-1,
+                         help="If set (>0), overrides --epochs and trains for exactly this "
+                              "many gradient steps. IMPORTANT: use this (with the same value "
+                              "across all duplication levels) so total training compute is "
+                              "held constant and doesn't confound with corpus size, since "
+                              "higher duplication levels produce bigger corpora and would "
+                              "otherwise get more gradient steps per epoch.")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--block_size", type=int, default=128)
@@ -79,9 +86,8 @@ def main():
 
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
 
-    training_args = TrainingArguments(
+    training_args_kwargs = dict(
         output_dir=args.out_dir,
-        num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         learning_rate=args.lr,
         logging_steps=10,
@@ -89,6 +95,12 @@ def main():
         report_to="none",
         fp16=torch.cuda.is_available(),
     )
+    if args.max_steps > 0:
+        training_args_kwargs["max_steps"] = args.max_steps
+    else:
+        training_args_kwargs["num_train_epochs"] = args.epochs
+
+    training_args = TrainingArguments(**training_args_kwargs)
 
     trainer = Trainer(
         model=model,

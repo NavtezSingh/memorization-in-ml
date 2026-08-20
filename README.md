@@ -8,11 +8,27 @@ This is a small, self-contained research project designed to be finished in ~15-
 free Colab/Kaggle GPU. It fine-tunes GPT-2 small on a synthetic corpus where you control exactly
 how many times each target fact appears, then measures:
 
-1. **Memorization** — can the model reproduce the exact fact string verbatim?
+1. **Memorization** — a continuous score (0-1): given only the first ~30% of a fact sentence,
+   how much of the true continuation does the model reproduce, word-for-word, in order?
 2. **Generalization** — how well does the model handle *paraphrases* of the fact it never saw
    during training (lower perplexity = better generalization)?
 3. **Diversity** — how repetitive/generic are the model's generations when prompted about
    heavily-duplicated content vs. rarely-seen content? (distinct-n, embedding diversity)
+
+**Important methodology note (learned the hard way):** with too few target facts, too small a
+filler-sentence pool, and training epochs left uncontrolled across corpus sizes, the first
+version of this pipeline hit a ceiling effect — memorization saturated at 1.0 and perplexity
+was flat at *every* duplication level, because the tiny world was trivially overfit almost
+immediately regardless of duplication count. The current version fixes this three ways:
+- **10 target facts** (not 4) instead of a handful, for finer-grained averages
+- **40 unique filler sentences** (not 10) so the surrounding "world" isn't trivial to overfit
+- **`--max_steps` in `train.py`** — use this (with the *same* value across every duplication
+  level) instead of `--epochs`, so every run gets the same total number of gradient updates.
+  Otherwise a bigger corpus (higher duplication) automatically gets more training steps per
+  epoch, which confounds "effect of duplication" with "effect of more training compute."
+- **Continuous, position-sensitive memorization score** instead of a binary
+  memorized/not-memorized threshold, so results have real resolution instead of collapsing to
+  a handful of discrete values.
 
 ## Why this project
 

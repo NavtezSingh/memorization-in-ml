@@ -29,10 +29,14 @@ from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 
 
 @torch.no_grad()
-def completion_exact_match(model, tokenizer, canonical_sentence, device, prompt_frac=0.5):
-    """Feeds the model the first `prompt_frac` of the sentence (by words) and greedily
-    generates a continuation of the remaining length. Returns True if the generated
-    continuation matches the true continuation closely (normalized word overlap >= 0.8)."""
+def completion_overlap_score(model, tokenizer, canonical_sentence, device, prompt_frac=0.3):
+    """Feeds the model only the first `prompt_frac` of the sentence (by words -- deliberately
+    small, so most of the sentence must be recalled rather than guessed from context) and
+    greedily generates a continuation. Returns a CONTINUOUS overlap score in [0, 1] (fraction
+    of true-continuation words reproduced in the right position) rather than a binary
+    threshold, so results have resolution finer than 1/num_facts. Average this across facts
+    to get a memorization score for a checkpoint; near 1.0 means near-verbatim recall, near 0
+    means no recall."""
     words = canonical_sentence.split()
     split_idx = max(1, int(len(words) * prompt_frac))
     prompt = " ".join(words[:split_idx])
@@ -49,12 +53,15 @@ def completion_exact_match(model, tokenizer, canonical_sentence, device, prompt_
     )
     generated = tokenizer.decode(output[0][input_ids.shape[1]:], skip_special_tokens=True)
 
-    true_words = set(true_continuation.lower().split())
-    gen_words = set(generated.lower().split())
+    true_words = true_continuation.lower().split()
+    gen_words = generated.lower().split()
     if not true_words:
-        return False
-    overlap = len(true_words & gen_words) / len(true_words)
-    return overlap >= 0.8
+        return 0.0
+    # Position-sensitive overlap: reward getting words right in roughly the right place,
+    # not just anywhere in the continuation (a pure set-overlap can be inflated by common
+    # words like "the"/"a" appearing anywhere).
+    matches = sum(1 for i, w in enumerate(true_words) if i < len(gen_words) and gen_words[i] == w)
+    return matches / len(true_words)
 
 
 @torch.no_grad()
@@ -69,18 +76,19 @@ def evaluate_checkpoint(ckpt_dir, facts, device):
     tokenizer.pad_token = tokenizer.eos_token
     model = GPT2LMHeadModel.from_pretrained(ckpt_dir).to(device).eval()
 
-    memorized = 0
+    overlap_scores = []
     paraphrase_ppls = []
 
     for fact in facts:
-        if completion_exact_match(model, tokenizer, fact["canonical"], device):
-            memorized += 1
+        overlap_scores.append(
+            completion_overlap_score(model, tokenizer, fact["canonical"], device)
+        )
         for paraphrase in fact["paraphrases"]:
             paraphrase_ppls.append(sentence_perplexity(model, tokenizer, paraphrase, device))
 
-    memorization_rate = memorized / len(facts)
+    memorization_score = sum(overlap_scores) / len(overlap_scores)
     avg_paraphrase_ppl = sum(paraphrase_ppls) / len(paraphrase_ppls)
-    return memorization_rate, avg_paraphrase_ppl
+    return memorization_score, avg_paraphrase_ppl
 
 
 def main():
@@ -100,8 +108,8 @@ def main():
         ckpt_dir = args.ckpt_dir_pattern.format(n=n)
         print(f"Evaluating checkpoint for duplication level {n} ({ckpt_dir}) ...")
         mem_rate, ppl = evaluate_checkpoint(ckpt_dir, facts, device)
-        print(f"  memorization_rate={mem_rate:.2f}  paraphrase_perplexity={ppl:.2f}")
-        results.append({"dup_level": n, "memorization_rate": mem_rate,
+        print(f"  memorization_score={mem_rate:.2f}  paraphrase_perplexity={ppl:.2f}")
+        results.append({"dup_level": n, "memorization_score": mem_rate,
                          "paraphrase_perplexity": ppl})
 
     out_dir = Path(args.out_dir)
@@ -110,14 +118,14 @@ def main():
         json.dump(results, f, indent=2)
 
     dup_levels = [r["dup_level"] for r in results]
-    mem_rates = [r["memorization_rate"] for r in results]
+    mem_rates = [r["memorization_score"] for r in results]
     ppls = [r["paraphrase_perplexity"] for r in results]
 
     fig, ax1 = plt.subplots(figsize=(7, 5))
     color1 = "tab:blue"
     ax1.set_xlabel("Duplication count (per fact)")
-    ax1.set_ylabel("Memorization rate (exact completion)", color=color1)
-    ax1.plot(dup_levels, mem_rates, marker="o", color=color1, label="Memorization rate")
+    ax1.set_ylabel("Memorization score (positional word overlap)", color=color1)
+    ax1.plot(dup_levels, mem_rates, marker="o", color=color1, label="Memorization score")
     ax1.tick_params(axis="y", labelcolor=color1)
     ax1.set_xscale("log")
 
