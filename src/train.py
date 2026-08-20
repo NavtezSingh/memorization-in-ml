@@ -58,16 +58,23 @@ def main():
     parser.add_argument("--model", type=str, default="gpt2",
                          help="HF model name, e.g. gpt2 (124M) or gpt2-medium if you have "
                               "the compute budget.")
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=1,
+                         help="Default is 1 (a single pass over the corpus). This is "
+                              "intentional: with epochs=1, each occurrence of a fact is seen "
+                              "by the optimizer exactly once, so total training exposure to a "
+                              "given fact string equals its duplication count exactly -- no "
+                              "epoch confound. Avoid setting this higher for this project; "
+                              "multiple epochs let even low-duplication facts get memorized, "
+                              "erasing the effect you're trying to measure.")
     parser.add_argument("--max_steps", type=int, default=-1,
-                         help="If set (>0), overrides --epochs and trains for exactly this "
-                              "many gradient steps. IMPORTANT: use this (with the same value "
-                              "across all duplication levels) so total training compute is "
-                              "held constant and doesn't confound with corpus size, since "
-                              "higher duplication levels produce bigger corpora and would "
-                              "otherwise get more gradient steps per epoch.")
+                         help="Generally NOT recommended for this project -- fixing total "
+                              "steps across differently-sized corpora inverts the intended "
+                              "manipulation (smaller corpora end up training far more epochs "
+                              "than larger ones). Prefer the epochs=1 default instead.")
     parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--lr", type=float, default=5e-5)
+    parser.add_argument("--lr", type=float, default=2e-5,
+                         help="Lowered from a more typical 5e-5 to slow down how fast the "
+                              "model overfits the tiny corpus.")
     parser.add_argument("--block_size", type=int, default=128)
     args = parser.parse_args()
 

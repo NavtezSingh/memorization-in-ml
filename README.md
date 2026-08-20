@@ -15,20 +15,35 @@ how many times each target fact appears, then measures:
 3. **Diversity** — how repetitive/generic are the model's generations when prompted about
    heavily-duplicated content vs. rarely-seen content? (distinct-n, embedding diversity)
 
-**Important methodology note (learned the hard way):** with too few target facts, too small a
-filler-sentence pool, and training epochs left uncontrolled across corpus sizes, the first
-version of this pipeline hit a ceiling effect — memorization saturated at 1.0 and perplexity
-was flat at *every* duplication level, because the tiny world was trivially overfit almost
-immediately regardless of duplication count. The current version fixes this three ways:
+**Important methodology notes (learned the hard way, through two failed runs):**
+
+*Run 1* hit a ceiling effect — memorization saturated at 1.0 and perplexity was flat at every
+duplication level, because a too-small corpus (4 facts, 10 filler sentences) was trivially
+overfit within 3 epochs regardless of duplication count. Fixed by expanding to 10 facts and 40
+filler sentences.
+
+*Run 2* tried to control for this by fixing total training steps (`--max_steps`) instead of
+epochs, reasoning that a bigger corpus (higher duplication) shouldn't get more total gradient
+updates just because it's bigger. This backfired badly: fixing total steps across
+differently-sized corpora means the *smallest* corpus (least duplication) ends up training for
+far more epochs than the *largest* one — e.g. at `max_steps=200`, the least-duplicated corpus
+trained for ~50 epochs while the most-duplicated one trained for under 1. The low-duplication
+model catastrophically overfit and collapsed (perplexity exploded from ~50 to ~6000), and all
+conditions converged to a similarly broken state — flat again, just flat somewhere much worse.
+
+**The correct design is `--epochs 1` (now the default in `train.py`).** With exactly one pass
+over the corpus, each occurrence of a fact is touched by the optimizer exactly once — so the
+total number of times the model sees a given fact string during training equals its
+duplication count *exactly*. No epoch confound, no steps confound. This is simpler than either
+previous attempt and is the right way to isolate the effect of duplication count.
+
+Also fixed along the way:
 - **10 target facts** (not 4) instead of a handful, for finer-grained averages
 - **40 unique filler sentences** (not 10) so the surrounding "world" isn't trivial to overfit
-- **`--max_steps` in `train.py`** — use this (with the *same* value across every duplication
-  level) instead of `--epochs`, so every run gets the same total number of gradient updates.
-  Otherwise a bigger corpus (higher duplication) automatically gets more training steps per
-  epoch, which confounds "effect of duplication" with "effect of more training compute."
 - **Continuous, position-sensitive memorization score** instead of a binary
   memorized/not-memorized threshold, so results have real resolution instead of collapsing to
-  a handful of discrete values.
+  a handful of discrete values
+- **Lower learning rate (2e-5, was 5e-5)** to slow down how fast the model overfits
 
 ## Why this project
 
